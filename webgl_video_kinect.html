@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>FLORA DISPLACEMENT - Audio Reactive Particle System</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link type="text/css" rel="stylesheet" href="main.css">
+  </head>
+  <body>
+
+    <!-- Video element where we reference our custom video file -->
+    <video id="video" loop muted crossOrigin="anonymous" playsinline style="display:none">
+      <!-- Update the source path to textures/DJSET.mp4 -->
+      <source src="FLORA-The Garden-f343fbc1.mp4" type="video/mp4">
+    </video>
+
+    <!-- Audio element for music (optional) -->
+    <audio id="audio" controls loop style="display:none">
+      <source src="audio.mp3" type="audio/mp3">
+    </audio>
+
+    <!-- Load three.js and OrbitControls from the correct CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script type="module">
+      let scene, camera, renderer, controls;
+      let video, texture, particles, analyser, audioCtx, audio, audioSource;
+      let particleCount = 480 * 480;  // Number of particles
+      let bassStrength = 0;  // Variable to store bass strength from audio
+      let aspectRatio = 1;  // Default aspect ratio
+      const luminanceThreshold = 0.2;  // Only displace particles if luminance is above this
+
+      init();
+
+      async function init() {
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+
+        // Set up scene and camera
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(0, 0, 1200);
+
+        video = document.getElementById('video');
+
+        // Load video metadata to adjust aspect ratio
+        video.addEventListener('loadedmetadata', () => {
+          const videoWidth = video.videoWidth;
+          const videoHeight = video.videoHeight;
+
+          // Calculate the video aspect ratio
+          aspectRatio = videoWidth / videoHeight;
+
+          // Adjust the particle system based on the aspect ratio
+          createParticleSystem(videoWidth, videoHeight);
+        });
+
+        texture = new THREE.VideoTexture(video);
+        texture.minFilter = THREE.NearestFilter;
+        texture.magFilter = THREE.NearestFilter;
+
+        video.play();
+
+        renderer = new THREE.WebGLRenderer();
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // Initialize OrbitControls
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;  // Smooth orbiting
+        controls.dampingFactor = 0.25;
+        controls.screenSpacePanning = false;  // Keep vertical orbit only
+        controls.maxDistance = 3000;  // Limit zoom out distance
+        controls.minDistance = 200;  // Limit zoom in distance
+
+        // Audio context setup for video or external audio reactivity
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audio = document.getElementById('audio');
+
+        // Uncomment below if using the video audio instead of separate audio
+        // const source = audioCtx.createMediaElementSource(video);  // Use audio from the video element
+
+        // Use external audio file instead
+        audioSource = audioCtx.createMediaElementSource(audio);  // Use audio from the external audio element
+
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 512;  // Set FFT size for frequency analysis
+        audioSource.connect(analyser);
+        analyser.connect(audioCtx.destination);
+
+        audio.play();  // Play the external audio (if used)
+
+        window.addEventListener('resize', onWindowResize);
+        animate();
+      }
+
+      function createParticleSystem(videoWidth, videoHeight) {
+        const geometry = new THREE.BufferGeometry();
+
+        const positions = new Float32Array(particleCount * 3);  // 3 coordinates per particle
+        const uvs = new Float32Array(particleCount * 2);  // 2 coordinates per particle for UV mapping
+
+        // Adjust particle system grid dimensions based on aspect ratio
+        const width = 240 * (videoWidth / videoHeight);  // Scale the width based on the video aspect ratio
+        const height = 240;
+
+        let index = 0;
+        for (let i = 0; i < 480; i++) {
+          for (let j = 0; j < 480; j++) {
+            // Set initial particle positions in a grid
+            positions[index * 3] = (i - 240) * (width / 240);  // x position (scale by aspect ratio)
+            positions[index * 3 + 1] = (j - 240) * (height / 240);  // y position
+            positions[index * 3 + 2] = 0;  // z position (will be displaced)
+
+            // Set UV coordinates for video mapping
+            uvs[index * 2] = i / 480;
+            uvs[index * 2 + 1] = j / 480;
+
+            index++;
+          }
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
+        // Vertex and fragment shaders for particles
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            'map': { value: texture },
+            'size': { value: 0.5 },  // Smaller particle size by default
+            'bassStrength': { value: 0.0 }  // Uniform to pass bass strength for displacement
+          },
+          vertexShader: `
+            uniform sampler2D map;
+            uniform float size;
+            uniform float bassStrength;  // Use bassStrength to affect displacement
+            varying vec2 vUv;
+            varying vec4 vColor;
+
+            void main() {
+              vUv = uv;
+              vec4 color = texture2D(map, uv);
+              vColor = color;  // Pass the color to the fragment shader
+
+              // Calculate luminance
+              float luminance = (color.r + color.g + color.b) / 3.0;
+
+              // Apply displacement only if luminance exceeds the threshold
+              float displacement = luminance > ${luminanceThreshold} ? luminance * (100.0 + bassStrength * 200.0) : 0.0;
+
+              // Set particle size based on luminance
+              gl_PointSize = size * (luminance * 6.0 + 3.0);  // Adjust size with luminance, much smaller by default
+
+              // Apply displacement
+              vec3 displacedPosition = position + vec3(0.0, 0.0, displacement);
+
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
+            }
+          `,
+          fragmentShader: `
+            varying vec2 vUv;
+            varying vec4 vColor;
+            void main() {
+              // Retain original color from the video texture
+              gl_FragColor = vColor;
+            }
+          `,
+          transparent: true
+        });
+
+        particles = new THREE.Points(geometry, material);  // Create particle system
+        scene.add(particles);
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function detectBass() {
+        const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(frequencyData);
+
+        // Focus on low frequencies (e.g., 0-100 Hz) for detecting bass
+        let bassTotal = 0;
+        const bassRange = 10;  // Focus on only the very first 10 bins of the frequency data (lower frequencies)
+        for (let i = 0; i < bassRange; i++) {
+          bassTotal += frequencyData[i];
+        }
+
+        bassStrength = bassTotal / bassRange / 255;  // Normalize bass strength between 0 and 1
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // Ensure particles is initialized before accessing its material
+        if (particles) {
+          controls.update();  // Update OrbitControls
+
+          detectBass();  // Detect bass strength
+          particles.material.uniforms.bassStrength.value = bassStrength;  // Pass bass strength to shader
+
+          renderer.render(scene, camera);
+        }
+      }
+    </script>
+  </body>
+</html>

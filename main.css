@@ -1,0 +1,16 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    background-color: #000;
+  }
+  
+  #info {
+    position: absolute;
+    top: 10px;
+    width: 100%;
+    color: #fff;
+    text-align: center;
+    z-index: 100;
+    display: block;
+  }
+  
