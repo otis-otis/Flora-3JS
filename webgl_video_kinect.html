@@ -9,13 +9,13 @@
   <body>
 
     <!-- Video element where we reference our custom video file -->
-    <video id="video" loop muted crossOrigin="anonymous" playsinline style="display:none">
+    <video id="video" loop muted crossOrigin="anonymous" playsinline style="display:none" autoplay>
       <!-- Update the source path to textures/DJSET.mp4 -->
       <source src="FLORA-The Garden-f343fbc1.mp4" type="video/mp4">
     </video>
 
     <!-- Audio element for music (optional) -->
-    <audio id="audio" controls loop style="display:none">
+    <audio id="audio" controls loop style="display:none" autoplay>
       <source src="audio.mp3" type="audio/mp3">
     </audio>
 
@@ -60,7 +60,7 @@
         texture.minFilter = THREE.NearestFilter;
         texture.magFilter = THREE.NearestFilter;
 
-        video.play();
+        video.play(); // Autoplay the video
 
         renderer = new THREE.WebGLRenderer();
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -90,7 +90,7 @@
         audioSource.connect(analyser);
         analyser.connect(audioCtx.destination);
 
-        audio.play();  // Play the external audio (if used)
+        audio.play();  // Autoplay the external audio
 
         window.addEventListener('resize', onWindowResize);
         animate();
